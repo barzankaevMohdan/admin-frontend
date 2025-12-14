@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { Plus, Connection, Delete, VideoCamera, Monitor } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import apiClient from '@/api/client'
@@ -19,6 +20,7 @@ interface Camera {
 const cameras = ref<Camera[]>([])
 const loading = ref(true)
 const showForm = ref(false)
+const isEditing = ref(false)
 const dialogVisible = ref(false)
 const selectedCamera = ref<number | null>(null)
 const streamUrl = ref('')
@@ -35,6 +37,9 @@ const form = ref({
   rtspPath: '/ISAPI/Streaming/Channels/101',
   recognitionEnabled: true,
 })
+
+const editingCameraId = ref<number | null>(null)
+const router = useRouter()
 
 onMounted(async () => {
   await loadCameras()
@@ -54,19 +59,36 @@ async function loadCameras() {
 
 async function handleSubmit() {
   try {
-    await apiClient.post('/api/cameras', form.value)
-    ElMessage.success('Камера успешно добавлена')
-    showForm.value = false
-    form.value = {
-      name: '',
-      location: '',
-      ip: '',
-      rtspPort: 554,
-      username: '',
-      password: '',
-      rtspPath: '/ISAPI/Streaming/Channels/101',
-      recognitionEnabled: true,
+    const payload: Record<string, any> = {
+      name: form.value.name,
+      location: form.value.location,
+      ip: form.value.ip,
+      rtspPort: form.value.rtspPort,
+      username: form.value.username,
+      rtspPath: form.value.rtspPath,
+      recognitionEnabled: form.value.recognitionEnabled,
     }
+
+    if (!editingCameraId.value) {
+      // Для создания пароль обязателен
+      if (!form.value.password) {
+        ElMessage.error('Укажите пароль для камеры')
+        return
+      }
+      payload.password = form.value.password
+      await apiClient.post('/api/cameras', payload)
+      ElMessage.success('Камера успешно добавлена')
+    } else {
+      // Для редактирования пароль опционален (отправляем только если заполнен)
+      if (form.value.password) {
+        payload.password = form.value.password
+      }
+      await apiClient.put(`/api/cameras/${editingCameraId.value}`, payload)
+      ElMessage.success('Камера обновлена')
+    }
+
+    resetFormFields()
+    showForm.value = false
     await loadCameras()
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || 'Не удалось создать камеру')
@@ -126,6 +148,47 @@ function closeStream() {
   showRecognition.value = false
 }
 
+function startCreate() {
+  resetFormFields()
+  showForm.value = true
+}
+
+function startEdit(camera: Camera) {
+  showForm.value = true
+  isEditing.value = true
+  editingCameraId.value = camera.id
+  form.value = {
+    name: camera.name,
+    location: camera.location || '',
+    ip: camera.ip,
+    rtspPort: camera.rtspPort,
+    username: camera.username,
+    password: '',
+    rtspPath: camera.rtspPath,
+    recognitionEnabled: camera.recognitionEnabled,
+  }
+}
+
+function resetFormFields() {
+  form.value = {
+    name: '',
+    location: '',
+    ip: '',
+    rtspPort: 554,
+    username: '',
+    password: '',
+    rtspPath: '/ISAPI/Streaming/Channels/101',
+    recognitionEnabled: true,
+  }
+  isEditing.value = false
+  editingCameraId.value = null
+}
+
+function cancelForm() {
+  resetFormFields()
+  showForm.value = false
+}
+
 const TEST_TIMEOUT_MS = 15000
 
 async function testConnection(id: number) {
@@ -163,7 +226,11 @@ async function testConnection(id: number) {
         <h1 class="page-title">Камеры</h1>
       </template>
       <template #extra>
-        <el-button type="primary" :icon="Plus" @click="showForm = !showForm">
+        <el-button
+          type="primary"
+          :icon="Plus"
+          @click="showForm ? cancelForm() : startCreate()"
+        >
           {{ showForm ? 'Отмена' : 'Добавить камеру' }}
         </el-button>
       </template>
@@ -171,7 +238,7 @@ async function testConnection(id: number) {
 
     <el-card v-if="showForm" class="form-card" shadow="never">
       <template #header>
-        <h2 style="margin: 0; font-size: 18px;">Добавить камеру</h2>
+        <h2 style="margin: 0; font-size: 18px;">{{ isEditing ? 'Редактировать камеру' : 'Добавить камеру' }}</h2>
       </template>
       
       <el-form :model="form" label-width="140px" label-position="left">
@@ -232,8 +299,8 @@ async function testConnection(id: number) {
         </el-row>
 
         <el-form-item>
-          <el-button type="primary" @click="handleSubmit">Создать</el-button>
-          <el-button @click="showForm = false">Отмена</el-button>
+          <el-button type="primary" @click="handleSubmit">{{ isEditing ? 'Сохранить' : 'Создать' }}</el-button>
+          <el-button @click="cancelForm">Отмена</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -266,7 +333,7 @@ async function testConnection(id: number) {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Действия" width="380" fixed="right">
+        <el-table-column label="Действия" width="530" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
               <el-button
@@ -294,6 +361,12 @@ async function testConnection(id: number) {
                 @click="testConnection(row.id)"
               >
                 Тест
+              </el-button>
+              <el-button
+                size="small"
+                @click="startEdit(row)"
+              >
+                Редактировать
               </el-button>
               <el-button
                 size="small"

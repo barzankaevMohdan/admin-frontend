@@ -15,6 +15,8 @@ interface Employee {
 const employees = ref<Employee[]>([])
 const loading = ref(true)
 const dialogVisible = ref(false)
+const isEditing = ref(false)
+const editingEmployeeId = ref<number | null>(null)
 
 const form = ref({
   name: '',
@@ -51,17 +53,26 @@ async function handleSubmit() {
       formData.append('photo', form.value.photo)
     }
 
-    await apiClient.post('/api/employees', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+    const url = isEditing.value && editingEmployeeId.value
+      ? `/api/employees/${editingEmployeeId.value}`
+      : '/api/employees'
 
-    ElMessage.success('Сотрудник успешно добавлен')
-    dialogVisible.value = false
-    form.value = { name: '', roleTitle: '', photo: null }
-    fileList.value = []
+    if (isEditing.value) {
+      await apiClient.put(url, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      ElMessage.success('Сотрудник обновлён')
+    } else {
+      await apiClient.post(url, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      ElMessage.success('Сотрудник успешно добавлен')
+    }
+
+    resetForm()
     await loadEmployees()
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.error || 'Не удалось создать сотрудника')
+    ElMessage.error(error.response?.data?.error || 'Не удалось сохранить сотрудника')
   }
 }
 
@@ -74,6 +85,31 @@ function handleFileChange(file: UploadFile) {
 
 function handleRemove() {
   form.value.photo = null
+}
+
+function startCreate() {
+  resetForm()
+  dialogVisible.value = true
+}
+
+function startEdit(employee: Employee) {
+  isEditing.value = true
+  editingEmployeeId.value = employee.id
+  dialogVisible.value = true
+  form.value = {
+    name: employee.name,
+    roleTitle: employee.role || '',
+    photo: null,
+  }
+  fileList.value = []
+}
+
+function resetForm() {
+  dialogVisible.value = false
+  isEditing.value = false
+  editingEmployeeId.value = null
+  form.value = { name: '', roleTitle: '', photo: null }
+  fileList.value = []
 }
 
 async function deleteEmployee(id: number) {
@@ -102,8 +138,8 @@ async function deleteEmployee(id: number) {
         <h1 class="page-title">Сотрудники</h1>
       </template>
       <template #extra>
-        <el-button type="primary" :icon="Plus" @click="dialogVisible = true">
-          Добавить сотрудника
+        <el-button type="primary" :icon="Plus" @click="startCreate">
+          {{ dialogVisible ? 'Отмена' : 'Добавить сотрудника' }}
         </el-button>
       </template>
     </el-page-header>
@@ -128,7 +164,7 @@ async function deleteEmployee(id: number) {
           </template>
         </el-table-column>
         
-        <el-table-column label="Действия" width="120" fixed="right">
+        <el-table-column label="Действия" width="200" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -138,6 +174,12 @@ async function deleteEmployee(id: number) {
             >
               Удалить
             </el-button>
+            <el-button
+              size="small"
+              @click="startEdit(row)"
+            >
+              Редактировать
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -145,7 +187,7 @@ async function deleteEmployee(id: number) {
 
     <el-dialog
       v-model="dialogVisible"
-      title="Добавить сотрудника"
+      :title="isEditing ? 'Редактировать сотрудника' : 'Добавить сотрудника'"
       width="500px"
     >
       <el-form :model="form" label-width="120px">
